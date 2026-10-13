@@ -1,13 +1,13 @@
 role,name,rarity,front,back
-player,ウォーリアー,C,Image(1).png,down.png
-target,マーセナリー,C,Image(2).png,down.png
-target,ナイト,C,Image(3).png,down.png
-target,ランサー,C,Image(4).png,down.png
-target,龍姫、ランヒルダ ,U,Image(5).png,down.png
-target,流氷のセイラン,U,Image(6).png,down.png
-target,剛剣、ヴィレッタ,U,Image(7).png,down.png
-target,新緑の代言、リド,U,Image(8).png,down.png
-target,聖騎士団長レリス,R,Image(9).png,down.png
-target,混沌の女王ノク,R,Image(10).png,down.png
-target,裁判長ジェミア,R,Image(11).png,down.png
-target,夜の狩人トーニィ,R,Image(12).png,down.png
+player,ウォーリアー,C,image(1).png,down.png
+target,マーセナリー,C,image(2).png,down.png
+target,ナイト,C,image(3).png,down.png
+target,ランサー,C,image(4).png,down.png
+target,龍姫、ランヒルダ ,U,image(5).png,down.png
+target,流氷のセイラン,U,image(6).png,down.png
+target,剛剣、ヴィレッタ,U,image(7).png,down.png
+target,新緑の代言、リド,U,image(8).png,down.png
+target,聖騎士団長レリス,R,image(9).png,down.png
+target,混沌の女王ノク,R,image(10).png,down.png
+target,裁判長ジェミア,R,image(11).png,down.png
+target,夜の狩人トーニィ,R,image(12).png,down.png
