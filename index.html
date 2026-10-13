@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>電脳めんこ大戦 - Cyber Menko Slam 3D (CSV版)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Yuji+Boku&family=Zen+Kaku+Gothic+New:wght@700;900&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: 'Zen Kaku Gothic New', sans-serif;
+      background-color: #0d0f17;
+    }
+    .font-calligraphy { font-family: 'Yuji Boku', serif; }
+    
+    #fx-canvas {
+      pointer-events: none;
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 20;
+    }
+    
+    .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #e11d48; border-radius: 9999px; }
+    .custom-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+    
+    #cancel-zone {
+      transition: all 0.2s ease-out;
+      transform: translateY(-100%);
+    }
+    #cancel-zone.active { transform: translateY(0); }
+    #cancel-zone.highlight {
+      background-color: rgba(225, 29, 72, 0.9);
+      border-color: #fb7185;
+      box-shadow: 0 10px 25px rgba(225, 29, 72, 0.5);
+    }
+    
+    #loading-screen {
+      position: absolute;
+      inset: 0;
+      z-index: 100;
+      background-color: #0d0f17;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: white;
+    }
+  </style>
+</head>
+<body class="w-screen h-screen relative bg-slate-950 text-white overflow-hidden select-none">
+
+  <div id="loading-screen">
+    <div class="text-2xl font-bold mb-4">データ読み込み中...</div>
+    <div id="loading-status" class="text-sm text-slate-400">CSVと画像をロードしています</div>
+  </div>
+
+  <div id="game-container" class="absolute inset-0 z-0"></div>
+  <canvas id="fx-canvas"></canvas>
+
+  <header class="absolute top-0 left-0 right-0 z-30 p-4 flex justify-between items-center bg-gradient-to-b from-slate-950/90 via-slate-900/40 to-transparent pointer-events-none">
+    <div class="flex items-center space-x-3 pointer-events-auto">
+      <div class="bg-rose-600/90 border border-rose-400/50 px-3 py-1 rounded-lg shadow-lg flex items-center space-x-2">
+        <span class="text-xs uppercase tracking-widest font-black text-rose-200">対戦相手</span>
+        <span id="opponent-name-badge" class="font-bold text-sm text-yellow-300">読込中...</span>
+      </div>
+      <div class="bg-black/60 backdrop-blur-md px-3 py-1 rounded-lg border border-white/10 text-xs">
+        めくり率: <span id="flip-stat" class="font-bold text-yellow-400">0%</span>
+      </div>
+    </div>
+    <div class="flex items-center space-x-2 pointer-events-auto">
+      <button id="btn-collection" class="bg-slate-800/80 hover:bg-slate-700/80 border border-white/20 text-white font-bold px-3.5 py-1.5 rounded-lg text-xs md:text-sm shadow-md transition-all active:scale-95 flex items-center gap-1.5">
+        <span>📖</span> 図鑑 (<span id="collection-count">0</span>)
+      </button>
+      <button id="btn-sound" class="bg-slate-800/80 hover:bg-slate-700/80 border border-white/20 text-white p-2 rounded-lg text-xs md:text-sm active:scale-95">🔊</button>
+    </div>
+  </header>
+
+  <div id="cancel-zone" class="absolute top-0 left-0 right-0 h-24 z-20 flex flex-col items-center justify-end pb-3 bg-slate-900/80 backdrop-blur-md border-b-4 border-slate-500 pointer-events-none">
+    <div class="text-white font-bold tracking-widest text-lg drop-shadow-md">🚫 ここにドロップするか、パワーを抜いてキャンセル</div>
+  </div>
+
+  <div id="slam-hud" class="absolute bottom-6 left-0 right-0 z-30 flex flex-col items-center pointer-events-none px-4">
+    <div id="guide-banner" class="mb-3 px-5 py-1.5 rounded-full bg-black/70 backdrop-blur-md border border-rose-500/40 text-xs md:text-sm text-rose-300 font-bold tracking-wide transition-opacity duration-300 text-center">
+      🎯 叩きつけたい場所をタップ<br>そのまま下へ引っ張ってパワー充填！
+    </div>
+    <div class="pointer-events-auto flex items-center gap-2 bg-slate-900/90 backdrop-blur-lg border border-slate-700/60 p-2 rounded-2xl shadow-2xl max-w-full overflow-x-auto custom-scroll">
+      <div class="text-[11px] font-black text-slate-400 uppercase tracking-tighter px-2 border-r border-slate-700">自機<br>めんこ</div>
+      <div id="striker-list" class="flex gap-2"></div>
+    </div>
+  </div>
+
+  <div id="announcement-overlay" class="absolute inset-0 z-40 flex flex-col items-center justify-center pointer-events-none opacity-0 transition-opacity duration-200">
+    <div id="announcement-text" class="font-calligraphy text-6xl md:text-8xl font-black text-yellow-300 drop-shadow-[0_8px_20px_rgba(239,68,68,0.9)] transform scale-90 transition-all duration-300">一本！</div>
+    <div id="announcement-sub" class="text-sm md:text-xl font-black tracking-widest text-white mt-4 bg-rose-600/90 px-6 py-1.5 rounded-full shadow-xl border border-rose-300">獲得成功！</div>
+  </div>
+
+  <div id="modal-album" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+      <div class="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950/60">
+        <div>
+          <h2 class="text-xl md:text-2xl font-black text-rose-400 font-calligraphy">めんこ絵巻図鑑</h2>
+          <p class="text-xs text-slate-400">勝利してひっくり返したイラストがコレクションされます</p>
+        </div>
+        <button id="btn-close-album" class="w-9 h-9 rounded-full bg-slate-800 hover:bg-rose-600 text-white font-bold">✕</button>
+      </div>
+      <div id="album-grid" class="p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 overflow-y-auto custom-scroll flex-1"></div>
+    </div>
+  </div>
+
+  <div id="modal-card-preview" class="fixed inset-0 z-50 bg-black/90 backdrop-blur-xl flex items-center justify-center p-4 hidden">
+    <div class="relative flex flex-col items-center max-w-xs md:max-w-sm w-full">
+      <button id="btn-close-preview" class="absolute -top-12 right-0 text-white bg-slate-800 hover:bg-rose-600 px-4 py-1 rounded-full text-sm font-bold">閉じる ✕</button>
+      <div id="preview-card-slot" class="w-full rounded-2xl overflow-hidden shadow-2xl border-4 border-amber-400"></div>
+      <div id="preview-card-info" class="w-full bg-slate-900 border border-slate-800 p-4 rounded-xl mt-4 text-center">
+        <h3 id="preview-card-name" class="font-bold text-lg text-amber-300"></h3>
+        <p id="preview-card-desc" class="text-xs text-slate-400 mt-1"></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    class MenkoAudio {
+      constructor() { this.ctx = null; this.muted = false; }
+      init() {
+        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        if (this.ctx.state === 'suspended') this.ctx.resume();
+      }
+      playWhoosh(power) {
+        if (this.muted || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
+        gain.gain.setValueAtTime(0.3 * power, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.25);
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.start(now); osc.stop(now + 0.25);
+      }
+      playSlam(power) {
+        if (this.muted || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(120 * power, now);
+        osc.frequency.exponentialRampToValueAtTime(20, now + 0.3);
+        gain.gain.setValueAtTime(1.0 * power, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.start(now); osc.stop(now + 0.3);
+
+        const bufSize = this.ctx.sampleRate * 0.1;
+        const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < bufSize; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufSize * 0.1));
+        const noise = this.ctx.createBufferSource(); noise.buffer = buf;
+        const filter = this.ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 2000;
+        const nGain = this.ctx.createGain(); nGain.gain.setValueAtTime(0.8 * power, now); nGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        noise.connect(filter); filter.connect(nGain); nGain.connect(this.ctx.destination);
+        noise.start(now);
+      }
+      playVictory() {
+        if (this.muted || !this.ctx) return;
+        const notes = [523.25, 659.25, 783.99, 1046.50];
+        notes.forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+          const st = this.ctx.currentTime + idx * 0.08;
+          osc.type = 'triangle'; osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.2, st); gain.gain.exponentialRampToValueAtTime(0.01, st + 0.4);
+          osc.connect(gain); gain.connect(this.ctx.destination);
+          osc.start(st); osc.stop(st + 0.4);
+        });
+      }
+    }
+    const sound = new MenkoAudio();
+  </script>
+
+  <script>
+    const CARD_ASPECT = 832 / 1216; 
+    let allCards = [];
+    let selectedStrikerId = null;
+    let currentOpponentIndex = 0;
+
+    // パスを解決するヘルパー（image/ が先頭についていなければ自動付与、相対パスそのままも対応）
+    function resolveImagePath(filename) {
+        if (!filename) return '';
+        filename = filename.trim();
+        if (filename.startsWith('http://') || filename.startsWith('https://') || filename.startsWith('data:')) {
+            return filename;
+        }
+        if (filename.startsWith('image/') || filename.startsWith('./image/')) {
+            return filename;
+        }
+        return 'image/' + filename;
+    }
+
+    function loadImage(src) {
+        return new Promise(resolve => {
+            if(!src) return resolve(null);
+            const resolved = resolveImagePath(src);
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => resolve(img);
+            img.onerror = () => {
+                console.warn("画像の読み込みに失敗しました:", resolved);
+                resolve(null);
+            };
+            img.src = resolved;
+        });
+    }
+
+    function generateCardCanvas(cardData, isBack = false) {
+      const w = 416, h = 608;
+      const cvs = document.createElement('canvas');
+      cvs.width = w; cvs.height = h;
+      const ctx = cvs.getContext('2d');
+
+      const targetImg = isBack ? cardData.backImg : cardData.frontImg;
+
+      if (targetImg) {
+        // PNGの透過対策で背景を暗色で塗りつぶす
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(targetImg, 0, 0, w, h);
+        
+        if (!isBack) {
+            ctx.lineWidth = 14; 
+            ctx.strokeStyle = cardData.rarity === 'UR' ? '#f59e0b' : '#38bdf8';
+            ctx.strokeRect(7, 7, w - 14, h - 14);
+            ctx.fillStyle = '#000000cc'; 
+            ctx.fillRect(16, h - 70, w - 32, 54);
+            ctx.fillStyle = '#fbbf24'; 
+            ctx.font = 'bold 24px sans-serif';
+            ctx.fillText(`[${cardData.rarity}] ${cardData.name}`, 26, h - 35);
+        }
+        return cvs;
+      }
+
+      // フォールバック描画（画像が見つからない・読み込めない時）
+      if (isBack) {
+        const bgGrad = ctx.createLinearGradient(0, 0, w, h);
+        bgGrad.addColorStop(0, '#0f172a'); bgGrad.addColorStop(1, '#020617');
+        ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, w, h);
+        
+        ctx.strokeStyle = '#334155'; ctx.lineWidth = 10;
+        for(let i = -w; i < h; i += 40) {
+            ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(w, i + w); ctx.stroke();
+        }
+        
+        ctx.save(); ctx.translate(w / 2, h / 2);
+        ctx.strokeStyle = '#e11d48'; ctx.lineWidth = 8;
+        ctx.beginPath(); ctx.arc(0, 0, 120, 0, Math.PI * 2); ctx.stroke();
+        
+        ctx.fillStyle = '#f43f5e'; ctx.font = 'bold 80px "Zen Kaku Gothic New", sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('裏 面', 0, -20);
+        ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 36px sans-serif';
+        ctx.fillText('BACK', 0, 45);
+        ctx.restore();
+        return cvs;
+      }
+
+      const grad = ctx.createLinearGradient(0, 0, w, h);
+      grad.addColorStop(0, cardData.gradient ? cardData.gradient[0] : '#3b82f6'); 
+      grad.addColorStop(1, cardData.gradient ? cardData.gradient[1] : '#1e1b4b');
+      ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+      
+      ctx.save(); ctx.translate(w / 2, h / 2); ctx.rotate(-Math.PI / 8);
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.font = 'bold 120px "Zen Kaku Gothic New", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('表 面', 0, -40);
+      ctx.font = 'bold 70px sans-serif'; ctx.fillText('FRONT', 0, 60);
+      ctx.restore();
+
+      const bColor = cardData.rarity === 'UR' ? '#fbbf24' : '#38bdf8';
+      ctx.lineWidth = 16; ctx.strokeStyle = bColor; ctx.strokeRect(8, 8, w - 16, h - 16);
+      
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)'; ctx.beginPath(); ctx.roundRect(24, h - 100, w - 48, 76, 12); ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = bColor; ctx.stroke();
+      
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 26px "Zen Kaku Gothic New", sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(cardData.name, w / 2, h - 55);
+      return cvs;
+    }
+  </script>
+
+  <script>
+    let scene, camera, renderer, world;
+    let opponentCardObj = null, strikerCardObj = null;
+    let cardPhysMaterial, floorPhysMaterial;
+    let reticleMesh;
+
+    let isDragging = false, isCanceling = false;
+    let dragStartScreenPos = { x: 0, y: 0 };
+    let slamPower = 0.0, slamAim = { x: 0, z: -0.6 };
+    let hasSlammed = false, roundCheckTimer = null;
+    let totalAttempts = 0, totalFlips = 0;
+
+    const CARD_PHYS_W = 1.35;
+    const CARD_PHYS_H = CARD_PHYS_W / CARD_ASPECT;
+
+    function init3D() {
+      const container = document.getElementById('game-container');
+      const w = window.innerWidth, h = window.innerHeight;
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0a0c14);
+      scene.fog = new THREE.FogExp2(0x0a0c14, 0.045);
+
+      camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 100);
+      camera.position.set(0, 7.5, 6.5);
+      camera.lookAt(0, 0, 0);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      renderer.setSize(w, h);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+
+      world = new CANNON.World();
+      world.gravity.set(0, -35.0, 0); 
+      world.broadphase = new CANNON.NaiveBroadphase();
+      world.solver.iterations = 30;
+
+      cardPhysMaterial = new CANNON.Material('card');
+      floorPhysMaterial = new CANNON.Material('floor');
+
+      world.addContactMaterial(new CANNON.ContactMaterial(floorPhysMaterial, cardPhysMaterial, {
+        friction: 0.8, restitution: 0.05
+      }));
+      world.addContactMaterial(new CANNON.ContactMaterial(cardPhysMaterial, cardPhysMaterial, {
+        friction: 0.7, restitution: 0.0, contactEquationStiffness: 1e6, contactEquationRelaxation: 3
+      }));
+
+      setupLighting();
+      setupArena();
+      setupAimReticle();
+      spawnOpponentCard(allCards[currentOpponentIndex]);
+
+      window.addEventListener('resize', onWindowResize);
+      setupInputHandlers();
+    }
+
+    function setupLighting() {
+      scene.add(new THREE.AmbientLight(0xfff1e6, 0.8));
+      const spot = new THREE.SpotLight(0xffedd5, 1.8);
+      spot.position.set(4, 12, 5);
+      spot.castShadow = true;
+      spot.shadow.mapSize.width = 1024; spot.shadow.mapSize.height = 1024;
+      scene.add(spot);
+      
+      const rimRed = new THREE.PointLight(0xf43f5e, 2.0, 15);
+      rimRed.position.set(-6, 2, -3); scene.add(rimRed);
+      const rimGold = new THREE.PointLight(0xf59e0b, 1.6, 15);
+      rimGold.position.set(6, 2, 3); scene.add(rimGold);
+    }
+
+    function setupArena() {
+      const texCvs = document.createElement('canvas');
+      texCvs.width = 512; texCvs.height = 512;
+      const ctx = texCvs.getContext('2d');
+      ctx.fillStyle = '#171923'; ctx.fillRect(0, 0, 512, 512);
+      ctx.strokeStyle = '#272a38'; ctx.lineWidth = 2;
+      for (let i = 0; i < 512; i += 16) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke(); }
+      const tex = new THREE.CanvasTexture(texCvs);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(6, 6);
+
+      const floorMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(24, 24),
+        new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 })
+      );
+      floorMesh.rotation.x = -Math.PI / 2; floorMesh.receiveShadow = true;
+      scene.add(floorMesh);
+
+      const floorBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane(), material: floorPhysMaterial });
+      floorBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+      world.addBody(floorBody);
+
+      const ring = new THREE.Mesh(new THREE.RingGeometry(3.6, 3.75, 48), new THREE.MeshBasicMaterial({ color: 0xe11d48, transparent: true, opacity: 0.3, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01;
+      scene.add(ring);
+
+      const createWall = (x, z, w, d) => {
+        const wall = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(w/2, 5, d/2)) });
+        wall.position.set(x, 0, z); world.addBody(wall);
+      };
+      createWall(0, -4.5, 10, 1); 
+      createWall(0, 4.5, 10, 1);  
+      createWall(-4.5, 0, 1, 10); 
+      createWall(4.5, 0, 1, 10);  
+    }
+
+    function setupAimReticle() {
+      reticleMesh = new THREE.Mesh(
+        new THREE.RingGeometry(0.25, 0.35, 32),
+        new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.8, side: THREE.DoubleSide })
+      );
+      reticleMesh.rotation.x = -Math.PI / 2;
+      reticleMesh.position.y = 0.02;
+      reticleMesh.visible = false;
+      scene.add(reticleMesh);
+    }
+
+    function create3DCardMesh(cardData) {
+      const frontTex = new THREE.CanvasTexture(generateCardCanvas(cardData, false)); frontTex.anisotropy = 4;
+      const backTex = new THREE.CanvasTexture(generateCardCanvas(cardData, true)); backTex.anisotropy = 4;
+
+      const edgeMat = new THREE.MeshStandardMaterial({ color: cardData.rarity==='UR'?0xf59e0b:0x94a3b8, roughness: 0.6 });
+      const frontMat = new THREE.MeshStandardMaterial({ map: frontTex, roughness: 0.4 });
+      const backMat = new THREE.MeshStandardMaterial({ map: backTex, roughness: 0.5 });
+
+      const materials = [edgeMat, edgeMat, frontMat, backMat, edgeMat, edgeMat];
+
+      const geo = new THREE.BoxGeometry(CARD_PHYS_W, cardData.thickness * 2.5, CARD_PHYS_H);
+      const mesh = new THREE.Mesh(geo, materials);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      return mesh;
+    }
+
+    function spawnOpponentCard(cardData) {
+      if (opponentCardObj) { scene.remove(opponentCardObj.mesh); world.remove(opponentCardObj.body); }
+
+      const mesh = create3DCardMesh(cardData);
+      scene.add(mesh);
+
+      const thickness = cardData.thickness * 2.5;
+      const shape = new CANNON.Box(new CANNON.Vec3(CARD_PHYS_W/2, thickness/2, CARD_PHYS_H/2));
+      const body = new CANNON.Body({
+        mass: cardData.weight * 2.5, 
+        shape: shape,
+        material: cardPhysMaterial,
+        linearDamping: 0.7, 
+        angularDamping: 0.6
+      });
+      body.position.set(0, thickness/2 + 0.05, -0.6);
+      world.addBody(body);
+
+      opponentCardObj = { mesh, body, data: cardData };
+      document.getElementById('opponent-name-badge').textContent = `[${cardData.rarity}] ${cardData.name}`;
+    }
+
+    const raycaster = new THREE.Raycaster();
+    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const mouseCoord = new THREE.Vector2();
+
+    function setupInputHandlers() {
+      const container = document.getElementById('game-container');
+      const cancelZone = document.getElementById('cancel-zone');
+
+      const onPointerDown = (e) => {
+        if (hasSlammed) return;
+        isDragging = true; isCanceling = false; slamPower = 0.0;
+        const cx = e.clientX || (e.touches && e.touches[0].clientX);
+        const cy = e.clientY || (e.touches && e.touches[0].clientY);
+        dragStartScreenPos = { x: cx, y: cy };
+        
+        mouseCoord.x = (cx / window.innerWidth) * 2 - 1;
+        mouseCoord.y = -(cy / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouseCoord, camera);
+        const hit = new THREE.Vector3();
+        if (raycaster.ray.intersectPlane(groundPlane, hit)) {
+          slamAim.x = Math.max(-2.5, Math.min(2.5, hit.x));
+          slamAim.z = Math.max(-3.0, Math.min(1.5, hit.z));
+          reticleMesh.position.set(slamAim.x, 0.02, slamAim.z);
+          reticleMesh.scale.set(0.8, 0.8, 0.8);
+          reticleMesh.material.color.setHex(0x38bdf8);
+          reticleMesh.visible = true;
+        }
+        cancelZone.classList.add('active');
+        cancelZone.classList.remove('highlight');
+      };
+
+      const onPointerMove = (e) => {
+        if (!isDragging || hasSlammed) return;
+        const cx = e.clientX || (e.touches && e.touches[0].clientX);
+        const cy = e.clientY || (e.touches && e.touches[0].clientY);
+        
+        const dy = cy - dragStartScreenPos.y;
+        slamPower = Math.max(0, Math.min(1.0, dy / 250));
+
+        const scale = 0.8 + slamPower * 1.5;
+        reticleMesh.scale.set(scale, scale, scale);
+        reticleMesh.material.color.setHex(slamPower > 0.8 ? 0xf43f5e : (slamPower > 0.4 ? 0xf59e0b : 0x38bdf8));
+
+        if (cy < 120 || dy < -20) {
+            isCanceling = true;
+            cancelZone.classList.add('highlight');
+            reticleMesh.material.color.setHex(0x94a3b8);
+        } else {
+            isCanceling = false;
+            cancelZone.classList.remove('highlight');
+        }
+      };
+
+      const onPointerUp = (e) => {
+        if (!isDragging) return;
+        isDragging = false;
+        reticleMesh.visible = false;
+        cancelZone.classList.remove('active', 'highlight');
+        
+        if (!hasSlammed) {
+          if (isCanceling || slamPower < 0.1) return;
+          const finalPower = Math.max(0.3, slamPower);
+          executeSlam(slamAim.x, slamAim.z, finalPower);
+        }
+      };
+
+      container.addEventListener('mousedown', onPointerDown);
+      window.addEventListener('mousemove', onPointerMove);
+      window.addEventListener('mouseup', onPointerUp);
+      container.addEventListener('touchstart', onPointerDown, { passive: true });
+      window.addEventListener('touchmove', onPointerMove, { passive: true });
+      window.addEventListener('touchend', onPointerUp);
+    }
+
+    function executeSlam(aimX, aimZ, power) {
+      if (hasSlammed) return;
+      hasSlammed = true; totalAttempts++;
+
+      sound.init(); sound.playWhoosh(power);
+
+      if (strikerCardObj) { scene.remove(strikerCardObj.mesh); world.remove(strikerCardObj.body); }
+
+      const sData = allCards.find(c => c.id === selectedStrikerId) || allCards[0];
+      const mesh = create3DCardMesh(sData); scene.add(mesh);
+
+      const body = new CANNON.Body({
+        mass: sData.weight * 4.5,
+        shape: new CANNON.Box(new CANNON.Vec3(CARD_PHYS_W/2, (sData.thickness*2.5)/2, CARD_PHYS_H/2)),
+        material: cardPhysMaterial,
+        linearDamping: 0.1, angularDamping: 0.1
+      });
+
+      body.position.set(aimX, 3.5, aimZ);
+      body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), (Math.random()-0.5)*0.3);
+      
+      const downVel = -20.0 * (0.5 + power * 0.6);
+      body.velocity.set(0, downVel, 0);
+      body.angularVelocity.set((Math.random()-0.5)*2, (Math.random()-0.5)*2, (Math.random()-0.5)*2);
+
+      world.addBody(body);
+      strikerCardObj = { mesh, body, data: sData };
+
+      let hasImpacted = false;
+      body.addEventListener('collide', () => {
+        if (!hasImpacted) {
+          hasImpacted = true;
+          handleSlamImpact(body.position, power);
+        }
+      });
+
+      clearTimeout(roundCheckTimer);
+      roundCheckTimer = setTimeout(checkFlipResult, 2500); 
+    }
+
+    function handleSlamImpact(pos, power) {
+      sound.playSlam(power);
+      triggerScreenShake(power);
+      trigger2DFX(pos.x, pos.z, power);
+
+      if (opponentCardObj && opponentCardObj.body) {
+        const oppBody = opponentCardObj.body;
+        const dx = oppBody.position.x - pos.x;
+        const dz = oppBody.position.z - pos.z;
+        const dist = Math.sqrt(dx*dx + dz*dz) + 0.1;
+
+        if (dist < 3.0) {
+          const force = (1.0 - dist/3.0) * power * 35.0;
+          oppBody.applyImpulse(new CANNON.Vec3(dx/dist*force*0.4, force*2.0, dz/dist*force*0.4), oppBody.position);
+          const torque = force * 3.0;
+          oppBody.angularVelocity.x += (Math.random() > 0.5 ? 1 : -1) * torque;
+          oppBody.angularVelocity.z += (Math.random() > 0.5 ? 1 : -1) * torque;
+        }
+      }
+    }
+
+    function checkFlipResult() {
+      if (!opponentCardObj) return;
+
+      const body = opponentCardObj.body;
+      const localUp = new CANNON.Vec3(0, 1, 0);
+      const worldUp = body.quaternion.vmult(localUp);
+      const isFlipped = worldUp.y < -0.1;
+
+      if (isFlipped) {
+        totalFlips++; sound.playVictory(); announceVictory();
+        markCardCaptured(opponentCardObj.data);
+      } else {
+        announceFailure();
+      }
+
+      const rate = totalAttempts > 0 ? Math.round((totalFlips/totalAttempts)*100) : 0;
+      document.getElementById('flip-stat').textContent = `${rate}% (${totalFlips}/${totalAttempts})`;
+      setTimeout(resetForNextTurn, 2200);
+    }
+    
+    function resetForNextTurn() {
+      hasSlammed = false;
+      let targets = allCards.filter(c => c.role === 'target');
+      if(targets.length > 0) {
+          spawnOpponentCard(targets[currentOpponentIndex % targets.length]);
+      }
+      if (strikerCardObj) { scene.remove(strikerCardObj.mesh); world.remove(strikerCardObj.body); strikerCardObj = null; }
+    }
+
+    const fxCanvas = document.getElementById('fx-canvas');
+    const fxCtx = fxCanvas.getContext('2d');
+    let screenShake = 0, shockwaves = [], speedlines = false;
+
+    window.addEventListener('resize', () => {
+      fxCanvas.width = window.innerWidth; fxCanvas.height = window.innerHeight;
+    }); fxCanvas.width = window.innerWidth; fxCanvas.height = window.innerHeight;
+
+    function triggerScreenShake(pow) { screenShake = pow * 20.0; }
+    function trigger2DFX(wx, wz, pow) {
+      const vec = new THREE.Vector3(wx, 0, wz).project(camera);
+      const sx = (vec.x * 0.5 + 0.5) * window.innerWidth;
+      const sy = (-(vec.y * 0.5) + 0.5) * window.innerHeight;
+      shockwaves.push({ x: sx, y: sy, r: 20, maxR: 280*pow, alpha: 1.0, col: pow>0.7?'#fbbf24':'#38bdf8' });
+      speedlines = true; setTimeout(() => speedlines = false, 180);
+    }
+
+    function updateAndDrawFX() {
+      fxCtx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+      for (let i = shockwaves.length - 1; i >= 0; i--) {
+        const sw = shockwaves[i];
+        sw.r += (sw.maxR - sw.r) * 0.2 + 5; sw.alpha -= 0.05;
+        if (sw.alpha <= 0) { shockwaves.splice(i, 1); continue; }
+        fxCtx.save(); fxCtx.beginPath(); fxCtx.arc(sw.x, sw.y, sw.r, 0, Math.PI * 2);
+        fxCtx.lineWidth = 15 * sw.alpha; fxCtx.strokeStyle = sw.col; fxCtx.globalAlpha = sw.alpha;
+        fxCtx.stroke(); fxCtx.restore();
+      }
+      if (speedlines) {
+        fxCtx.save(); const cx = fxCanvas.width/2, cy = fxCanvas.height/2;
+        fxCtx.strokeStyle = 'rgba(255,255,255,0.4)'; fxCtx.lineWidth = 3;
+        for (let i = 0; i < 24; i++) {
+          const ang = (Math.PI*2*i)/24 + (Math.random()-0.5)*0.1;
+          fxCtx.beginPath(); fxCtx.moveTo(cx+Math.cos(ang)*cx*0.4, cy+Math.sin(ang)*cy*0.4);
+          fxCtx.lineTo(cx+Math.cos(ang)*cx*1.5, cy+Math.sin(ang)*cy*1.5); fxCtx.stroke();
+        }
+        fxCtx.restore();
+      }
+      if (screenShake > 0.1) {
+        camera.position.x = (Math.random()-0.5)*screenShake*0.04;
+        camera.position.y = 7.5 + (Math.random()-0.5)*screenShake*0.04;
+        screenShake *= 0.85;
+      } else { camera.position.x = 0; camera.position.y = 7.5; screenShake = 0; }
+    }
+
+    function announceVictory() {
+      const b = document.getElementById('announcement-overlay'), t = document.getElementById('announcement-text'), s = document.getElementById('announcement-sub');
+      t.textContent = '一本！'; t.className = 'font-calligraphy text-6xl md:text-8xl font-black text-yellow-300 drop-shadow-[0_8px_25px_rgba(234,179,8,1)] transform scale-110 -rotate-3 transition-all duration-300';
+      s.textContent = '獲得成功！図鑑に解放されました！'; s.className = 'text-sm md:text-xl font-black text-slate-900 mt-4 bg-yellow-400 px-8 py-2 rounded-full border-2 border-white shadow-xl';
+      b.style.opacity = '1'; setTimeout(() => b.style.opacity = '0', 2000);
+    }
+
+    function announceFailure() {
+      const b = document.getElementById('announcement-overlay'), t = document.getElementById('announcement-text'), s = document.getElementById('announcement-sub');
+      t.textContent = '無念…！'; t.className = 'font-calligraphy text-5xl md:text-7xl font-black text-slate-400 drop-shadow-[0_4px_15px_rgba(0,0,0,0.8)] transform scale-95 transition-all duration-300';
+      s.textContent = 'もっとパワーを溜めて叩きつけろ！'; s.className = 'text-sm font-bold text-rose-300 mt-4 bg-slate-900/90 px-6 py-1.5 rounded-full border border-rose-500/50';
+      b.style.opacity = '1'; setTimeout(() => b.style.opacity = '0', 1600);
+    }
+
+    function markCardCaptured(c) {
+      c.captured = true; renderAlbum(); renderDrawer();
+      let targets = allCards.filter(card => card.role === 'target');
+      currentOpponentIndex = (currentOpponentIndex + 1) % targets.length;
+    }
+
+    function renderDrawer() {
+      const c = document.getElementById('striker-list'); c.innerHTML = '';
+      allCards.forEach(card => {
+        if(!card.captured && card.role !== 'player') return; 
+        const btn = document.createElement('button');
+        const isSel = card.id === selectedStrikerId;
+        btn.className = `flex-shrink-0 flex flex-col items-center p-1.5 rounded-xl border-2 transition-all ${isSel ? 'border-amber-400 bg-amber-500/20 scale-105 shadow-lg' : 'border-slate-700 bg-slate-800/60 opacity-80 hover:opacity-100'}`;
+        const cvs = generateCardCanvas(card); cvs.className = 'w-12 h-16 rounded object-cover border border-white/20';
+        const lbl = document.createElement('span'); lbl.className = 'text-[10px] font-bold mt-1 text-slate-200 truncate max-w-[64px]'; lbl.textContent = card.name;
+        btn.append(cvs, lbl); btn.onclick = () => { selectedStrikerId = card.id; renderDrawer(); };
+        c.appendChild(btn);
+      });
+    }
+
+    function renderAlbum() {
+      const grid = document.getElementById('album-grid'); grid.innerHTML = '';
+      let targets = allCards.filter(c => c.role === 'target');
+      let unl = 0;
+      targets.forEach(c => {
+        if(c.captured) unl++;
+        const item = document.createElement('div');
+        item.className = 'flex flex-col items-center bg-slate-950/80 p-3 rounded-2xl border border-slate-800 hover:border-rose-500/60 cursor-pointer group';
+        const cvs = generateCardCanvas(c, !c.captured);
+        cvs.className = `w-full h-auto rounded-xl shadow-lg border border-slate-700/60 ${c.captured ? 'group-hover:scale-105' : 'filter grayscale contrast-125 opacity-40'} transition-transform`;
+        const lbl = document.createElement('div'); lbl.className = 'text-xs font-bold mt-2 text-center truncate w-full text-slate-200';
+        lbl.textContent = c.captured ? `[${c.rarity}] ${c.name}` : '？？？(未獲得)';
+        item.append(cvs, lbl);
+        if(c.captured) item.onclick = () => {
+          document.getElementById('preview-card-slot').innerHTML = '';
+          const pCvs = generateCardCanvas(c); pCvs.className = 'w-full h-auto max-h-[70vh] object-contain rounded-xl';
+          document.getElementById('preview-card-slot').appendChild(pCvs);
+          document.getElementById('preview-card-name').textContent = `[${c.rarity}] ${c.name}`;
+          document.getElementById('modal-card-preview').classList.remove('hidden');
+        };
+        grid.appendChild(item);
+      });
+      document.getElementById('collection-count').textContent = `${unl}/${targets.length}`;
+    }
+
+    document.getElementById('btn-collection').onclick = () => document.getElementById('modal-album').classList.remove('hidden');
+    document.getElementById('btn-close-album').onclick = () => document.getElementById('modal-album').classList.add('hidden');
+    document.getElementById('btn-close-preview').onclick = () => document.getElementById('modal-card-preview').classList.add('hidden');
+    document.getElementById('btn-sound').onclick = (e) => { sound.init(); sound.muted = !sound.muted; e.target.textContent = sound.muted ? '🔇' : '🔊'; };
+
+    let lastTime = performance.now();
+    function onWindowResize() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const time = performance.now(); const dt = Math.min((time - lastTime)/1000, 0.05); lastTime = time;
+
+      world.step(1/60, dt, 3);
+
+      if (opponentCardObj && opponentCardObj.mesh) {
+        opponentCardObj.mesh.position.copy(opponentCardObj.body.position);
+        opponentCardObj.mesh.quaternion.copy(opponentCardObj.body.quaternion);
+      }
+      if (strikerCardObj && strikerCardObj.mesh) {
+        strikerCardObj.mesh.position.copy(strikerCardObj.body.position);
+        strikerCardObj.mesh.quaternion.copy(strikerCardObj.body.quaternion);
+      }
+
+      if(reticleMesh && !hasSlammed) reticleMesh.rotation.z += 0.02;
+
+      renderer.render(scene, camera);
+      updateAndDrawFX();
+    }
+
+    window.onload = async () => {
+        try {
+            const res = await fetch('data.csv');
+            if(!res.ok) throw new Error('CSV fetch failed');
+            const text = await res.text();
+            const lines = text.trim().split('\n').map(l => l.trim()).filter(l => l.length > 0).slice(1);
+            let idCounter = 0;
+            for (const line of lines) {
+                const cols = line.split(',');
+                if(cols.length >= 5) {
+                    const role = cols[0].trim();
+                    const name = cols[1].trim();
+                    const rarity = cols[2].trim();
+                    const frontSrc = cols[3].trim();
+                    const backSrc = cols[4].trim();
+
+                    const frontImg = await loadImage(frontSrc);
+                    const backImg = await loadImage(backSrc);
+
+                    allCards.push({
+                        id: 'c' + idCounter++,
+                        role: role,
+                        name: name,
+                        rarity: rarity,
+                        weight: role === 'target' ? 1.4 : 1.2,
+                        thickness: 0.035,
+                        frontImg: frontImg,
+                        backImg: backImg,
+                        captured: role === 'player'
+                    });
+                }
+            }
+        } catch(e) {
+            console.warn("CSVの読み込みに失敗しました（ローカル直開き等）:", e);
+        }
+
+        if (allCards.length === 0) {
+            allCards = [
+                { id: 'c1', role: 'target', name: 'ダミー敵(CSV未読込)', rarity: 'UR', weight: 1.4, thickness: 0.04, captured: false },
+                { id: 'c2', role: 'player', name: '初心者めんこ', rarity: 'R', weight: 1.0, thickness: 0.025, captured: true }
+            ];
+        }
+
+        const playerCard = allCards.find(c => c.role === 'player') || allCards[0];
+        selectedStrikerId = playerCard.id;
+
+        document.getElementById('loading-screen').style.display = 'none';
+
+        init3D(); 
+        renderDrawer(); 
+        renderAlbum(); 
+        animate(); 
+    };
+  </script>
+</body>
+</html>
